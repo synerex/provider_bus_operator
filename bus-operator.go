@@ -83,7 +83,7 @@ func main() {
 	sxutil.RegisterDeferFunction(sxutil.UnRegisterNode)
 	log.Printf("%s(%s) built %s sha1 %s", role, sxutil.GitVer, sxutil.BuildTime, sxutil.Sha1Ver)
 
-	channelTypes := []uint32{pbase.GRIDEYE_SVC}
+	channelTypes := []uint32{pbase.ALT_PT_SVC, pbase.JSON_DATA_SVC}
 
 	var rerr error
 	sxServerAddress, rerr = sxutil.RegisterNode(*nodesrv, role, channelTypes, nil)
