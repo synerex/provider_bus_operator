@@ -5,11 +5,11 @@ import (
 	"flag"
 	"fmt"
 
-	json "github.com/synerex/proto_json"
 	rcm "github.com/synerex/proto_recommend"
 	api "github.com/synerex/synerex_api"
 	pbase "github.com/synerex/synerex_proto"
 	sxutil "github.com/synerex/synerex_sxutil"
+	"google.golang.org/protobuf/proto"
 
 	"log"
 	"sync"
@@ -31,7 +31,10 @@ func init() {
 
 func supplyRecommendCallback(clt *sxutil.SXServiceClient, sp *api.Supply) {
 	recommend := &rcm.Recommend{}
-	log.Printf("Received Recommend Supply from %d %+v", sp.SenderId, recommend)
+	err := proto.Unmarshal(sp.Cdata.Entity, recommend)
+	if err == nil {
+		log.Printf("Received Recommend Supply from %d %+v", sp.SenderId, recommend)
+	}
 }
 
 func subscribeRecommendSupply(client *sxutil.SXServiceClient) {
@@ -44,8 +47,7 @@ func subscribeRecommendSupply(client *sxutil.SXServiceClient) {
 }
 
 func supplyJsonRecordCallback(clt *sxutil.SXServiceClient, sp *api.Supply) {
-	jsonRecord := &json.JsonRecord{}
-	log.Printf("Received JsonRecord Supply from %d %+v", sp.SenderId, jsonRecord.Json)
+	log.Printf("Received JsonRecord Supply from %d %+v", sp.SenderId, sp.ArgJson)
 }
 
 func subscribeJsonRecordSupply(client *sxutil.SXServiceClient) {
