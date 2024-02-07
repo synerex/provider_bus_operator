@@ -85,7 +85,7 @@ func main() {
 	sxutil.RegisterDeferFunction(sxutil.UnRegisterNode)
 	log.Printf("%s(%s) built %s sha1 %s", role, sxutil.GitVer, sxutil.BuildTime, sxutil.Sha1Ver)
 
-	channelTypes := []uint32{pbase.ALT_PT_SVC, pbase.JSON_DATA_SVC}
+	channelTypes := []uint32{pbase.ALT_PT_SVC} //, pbase.JSON_DATA_SVC}
 
 	var rerr error
 	sxServerAddress, rerr = sxutil.RegisterNode(*nodesrv, role, channelTypes, nil)
@@ -109,11 +109,11 @@ func main() {
 	}
 
 	rcmClient := sxutil.NewSXServiceClient(client, pbase.ALT_PT_SVC, fmt.Sprintf("{Client:%s}", role))
-	envClient := sxutil.NewSXServiceClient(client, pbase.JSON_DATA_SVC, fmt.Sprintf("{Client:%s}", role))
+	// envClient := sxutil.NewSXServiceClient(client, pbase.JSON_DATA_SVC, fmt.Sprintf("{Client:%s}", role))
 
 	wg.Add(1)
 	log.Print("Subscribe Supply")
 	go subscribeRecommendSupply(rcmClient)
-	go subscribeJsonRecordSupply(envClient)
+	// go subscribeJsonRecordSupply(envClient)
 	wg.Wait()
 }
