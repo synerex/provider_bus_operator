@@ -36,10 +36,10 @@ func supplyRecommendDemandCallback(clt *sxutil.SXServiceClient, dm *api.Demand) 
 	if dm.Cdata != nil {
 		err := proto.Unmarshal(dm.Cdata.Entity, recommend)
 		if err == nil {
-			log.Printf("Received Recommend Supply from %d %+v", dm.SenderId, recommend)
+			log.Printf("Received Recommend Demand from %d %+v", dm.SenderId, recommend)
 		}
 	} else {
-		log.Printf("Received JsonRecord Supply from %d %+v", dm.SenderId, dm.ArgJson)
+		log.Printf("Received JsonRecord Demand from %d %+v", dm.SenderId, dm.ArgJson)
 		ta := gjson.Get(dm.ArgJson, 臨時便)
 		if ta.Type == gjson.JSON {
 			log.Printf("Demand of 臨時便: %+v", ta.Value())
