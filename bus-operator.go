@@ -136,7 +136,7 @@ func main() {
 			fmt.Println("実行時刻:", t.Format("15:04:05"))
 			smo := sxutil.SupplyOpts{
 				Name: role,
-				JSON: fmt.Sprintf("{\"%s\": \"chincha\"}", role), // ここにバス運行状況を入れる
+				JSON: fmt.Sprintf(`{ "%s": null }`, role), // ここにバス運行状況を入れる
 			}
 			_, nerr := rcmClient.NotifySupply(&smo)
 			if nerr != nil {
