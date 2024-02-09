@@ -9,6 +9,7 @@ import (
 	api "github.com/synerex/synerex_api"
 	pbase "github.com/synerex/synerex_proto"
 	sxutil "github.com/synerex/synerex_sxutil"
+	"github.com/tidwall/gjson"
 	"google.golang.org/protobuf/proto"
 
 	"log"
@@ -23,13 +24,37 @@ var (
 	version         = "0.0.0"
 	role            = "BusOperator"
 	sxServerAddress string
+	臨時便             = "臨時便"
 )
 
 func init() {
 	flag.Parse()
 }
 
-func supplyRecommendCallback(clt *sxutil.SXServiceClient, sp *api.Supply) {
+func supplyRecommendDemandCallback(clt *sxutil.SXServiceClient, dm *api.Demand) {
+	recommend := &rcm.Recommend{}
+	if dm.Cdata != nil {
+		err := proto.Unmarshal(dm.Cdata.Entity, recommend)
+		if err == nil {
+			log.Printf("Received Recommend Supply from %d %+v", dm.SenderId, recommend)
+		}
+	} else {
+		log.Printf("Received JsonRecord Supply from %d %+v", dm.SenderId, dm.ArgJson)
+		ta := gjson.Get(dm.ArgJson, 臨時便)
+		if ta.Type == gjson.JSON {
+			log.Printf("Demand of 臨時便: %+v", ta.Value())
+
+			spo := sxutil.SupplyOpts{
+				Name: role,
+				JSON: fmt.Sprintf(`{ "臨時便": ["岩倉", "江南"] }`),
+			}
+			id := clt.ProposeSupply(&spo)
+			log.Printf("Returned ID: %v\n", id)
+		}
+	}
+}
+
+func supplyRecommendSupplyCallback(clt *sxutil.SXServiceClient, sp *api.Supply) {
 	recommend := &rcm.Recommend{}
 	if sp.Cdata != nil {
 		err := proto.Unmarshal(sp.Cdata.Entity, recommend)
@@ -44,20 +69,7 @@ func supplyRecommendCallback(clt *sxutil.SXServiceClient, sp *api.Supply) {
 func subscribeRecommendSupply(client *sxutil.SXServiceClient) {
 	ctx := context.Background() //
 	for {                       // make it continuously working..
-		client.SubscribeSupply(ctx, supplyRecommendCallback)
-		log.Print("Error on subscribe")
-		reconnectClient(client)
-	}
-}
-
-func supplyJsonRecordCallback(clt *sxutil.SXServiceClient, sp *api.Supply) {
-	log.Printf("Received JsonRecord Supply from %d %+v", sp.SenderId, sp.ArgJson)
-}
-
-func subscribeJsonRecordSupply(client *sxutil.SXServiceClient) {
-	ctx := context.Background() //
-	for {                       // make it continuously working..
-		client.SubscribeSupply(ctx, supplyJsonRecordCallback)
+		client.SubscribeSupply(ctx, supplyRecommendSupplyCallback)
 		log.Print("Error on subscribe")
 		reconnectClient(client)
 	}
@@ -118,6 +130,7 @@ func main() {
 	wg.Add(1)
 	log.Print("Subscribe Supply")
 	go subscribeRecommendSupply(rcmClient)
+	sxutil.SimpleSubscribeDemand(rcmClient, supplyRecommendDemandCallback)
 	// go subscribeJsonRecordSupply(envClient)
 
 	// タイマーを開始する
