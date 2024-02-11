@@ -25,6 +25,7 @@ var (
 	role            = "BusOperator"
 	sxServerAddress string
 	臨時便             = "臨時便"
+	proposedSpIds   []uint64
 )
 
 func init() {
@@ -36,20 +37,37 @@ func supplyRecommendDemandCallback(clt *sxutil.SXServiceClient, dm *api.Demand) 
 	if dm.Cdata != nil {
 		err := proto.Unmarshal(dm.Cdata.Entity, recommend)
 		if err == nil {
-			log.Printf("Received Recommend Demand from %d %+v", dm.SenderId, recommend)
+			log.Printf("Received Recommend Demand: Demand %+v, Recommend %+v", dm, recommend)
 		}
 	} else {
-		log.Printf("Received JsonRecord Demand from %d %+v", dm.SenderId, dm.ArgJson)
 		ta := gjson.Get(dm.ArgJson, 臨時便)
 		if ta.Type == gjson.JSON {
-			log.Printf("Demand of 臨時便: %+v", ta.Value())
+			log.Printf("Received JsonRecord 臨時便 Demand: Demand %+v, JSON: %s", dm, dm.ArgJson)
 
 			spo := sxutil.SupplyOpts{
 				Name: role,
 				JSON: fmt.Sprintf(`{ "臨時便": ["岩倉", "江南"] }`),
 			}
-			id := clt.ProposeSupply(&spo)
-			log.Printf("Returned ID: %v\n", id)
+			spid := clt.ProposeSupply(&spo)
+			proposedSpIds = append(proposedSpIds, spid)
+			log.Printf("#2 ProposeSupply OK! spo: %#v, spid: %d\n", spo, spid)
+		}
+
+		flag := false
+		for _, pdid := range proposedSpIds {
+			if pdid == dm.TargetId {
+				flag = true
+				log.Printf("Received JsonRecord Demand for me: Demand %+v, JSON: %s", dm, dm.ArgJson)
+				err := clt.Confirm(sxutil.IDType(dm.Id), sxutil.IDType(dm.Id))
+				if err != nil {
+					log.Printf("#8 Confirm Send Fail! %v\n", err)
+				} else {
+					log.Printf("#8 Confirmed! %+v\n", dm)
+				}
+			}
+		}
+		if !flag {
+			log.Printf("Received JsonRecord Demand for others: Demand %+v, JSON: %s", dm, dm.ArgJson)
 		}
 	}
 }
@@ -59,10 +77,10 @@ func supplyRecommendSupplyCallback(clt *sxutil.SXServiceClient, sp *api.Supply) 
 	if sp.Cdata != nil {
 		err := proto.Unmarshal(sp.Cdata.Entity, recommend)
 		if err == nil {
-			log.Printf("Received Recommend Supply from %d %+v", sp.SenderId, recommend)
+			log.Printf("Received Recommend Supply: Supply %+v, Recommend %+v", sp, recommend)
 		}
 	} else {
-		log.Printf("Received JsonRecord Supply from %d %+v", sp.SenderId, sp.ArgJson)
+		log.Printf("Received JsonRecord Supply: Supply %+v, JSON: %s", sp, sp.ArgJson)
 	}
 }
 
