@@ -46,7 +46,7 @@ func supplyRecommendDemandCallback(clt *sxutil.SXServiceClient, dm *api.Demand) 
 
 			spo := sxutil.SupplyOpts{
 				Name: role,
-				JSON: fmt.Sprintf(`{ "臨時便": ["岩倉", "江南"] }`),
+				JSON: `{ "type": "臨時便", "vehicle": "マイクロバス", "date": "ASAP", "from": "岩倉駅", "to": "江南駅", "stops": "none", "way": "round-trip", "repetition": 4 }`,
 			}
 			spid := clt.ProposeSupply(&spo)
 			proposedSpIds = append(proposedSpIds, spid)
