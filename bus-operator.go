@@ -24,6 +24,7 @@ var (
 	version         = "0.0.0"
 	role            = "BusOperator"
 	sxServerAddress string
+	typeProp        = "type"
 	臨時便             = "臨時便"
 	proposedSpIds   []uint64
 )
@@ -40,8 +41,8 @@ func supplyRecommendDemandCallback(clt *sxutil.SXServiceClient, dm *api.Demand) 
 			log.Printf("Received Recommend Demand: Demand %+v, Recommend %+v", dm, recommend)
 		}
 	} else {
-		ta := gjson.Get(dm.ArgJson, 臨時便)
-		if ta.Type == gjson.JSON {
+		ta := gjson.Get(dm.ArgJson, typeProp)
+		if ta.Type == gjson.String && ta.Str == 臨時便 {
 			log.Printf("Received JsonRecord 臨時便 Demand: Demand %+v, JSON: %s", dm, dm.ArgJson)
 
 			spo := sxutil.SupplyOpts{
