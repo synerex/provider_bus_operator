@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
+	"net/http"
 
 	rcm "github.com/synerex/proto_recommend"
 	api "github.com/synerex/synerex_api"
@@ -45,9 +48,48 @@ func supplyRecommendDemandCallback(clt *sxutil.SXServiceClient, dm *api.Demand) 
 		if ta.Type == gjson.String && ta.Str == 臨時便 {
 			log.Printf("Received JsonRecord 臨時便 Demand: Demand %+v, JSON: %s", dm, dm.ArgJson)
 
+			var result map[string]interface{}
+			err := json.Unmarshal([]byte(dm.ArgJson), &result)
+			if err != nil {
+				fmt.Println("Error parsing JSON:", err)
+				return
+			}
+
+			index, ok := result["index"].(float64)
+			if !ok {
+				fmt.Println("Error: index is not a number, defaulting to 0")
+				index = 0
+			} else {
+				fmt.Printf("ID: %d\n", int(index))
+			}
+
+			demandDepartureTime, ok := result["demand_departure_time"].(float64)
+			if !ok {
+				fmt.Println("Error: demand_departure_time is not a number, defaulting to 0")
+				demandDepartureTime = 0
+			} else {
+				fmt.Printf("Demand Departure Time: %d\n", int(demandDepartureTime))
+			}
+
+			url := fmt.Sprintf(`http://host.docker.internal:5000/api/v0/bus_diagram_adjust?index=%d&demand_departure_time=%d`, index, demandDepartureTime)
+			resp, err := http.Get(url)
+			if err != nil {
+				fmt.Println("Error:", err)
+				return
+			}
+			defer resp.Body.Close()
+
+			body, err := ioutil.ReadAll(resp.Body)
+			if err != nil {
+				fmt.Println("Error:", err)
+				return
+			}
+
+			fmt.Println("Response:", string(body))
+
 			spo := sxutil.SupplyOpts{
 				Name: role,
-				JSON: `{ "type": "臨時便", "vehicle": "マイクロバス", "date": "ASAP", "from": "岩倉駅", "to": "江南駅", "stops": "none", "way": "round-trip", "repetition": 4 }`,
+				JSON: fmt.Sprintf(`{ "index": %d , "demand_departure_time": %d, "type": "臨時便", "vehicle": "マイクロバス", "date": "ASAP", "from": "岩倉駅", "to": "江南駅", "stops": "none", "way": "round-trip", "repetition": 4 }`, index, demandDepartureTime),
 			}
 			spid := clt.ProposeSupply(&spo)
 			proposedSpIds = append(proposedSpIds, spid)
