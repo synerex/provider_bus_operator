@@ -55,7 +55,7 @@ func supplyRecommendDemandCallback(clt *sxutil.SXServiceClient, dm *api.Demand) 
 				return
 			}
 
-			index, ok := result["index"].(float64)
+			index, ok := result["index"].(int)
 			if !ok {
 				fmt.Println("Error: index is not a number, defaulting to 0")
 				index = 0
@@ -63,7 +63,7 @@ func supplyRecommendDemandCallback(clt *sxutil.SXServiceClient, dm *api.Demand) 
 				fmt.Printf("ID: %d\n", int(index))
 			}
 
-			demandDepartureTime, ok := result["demand_departure_time"].(float64)
+			demandDepartureTime, ok := result["demand_departure_time"].(int)
 			if !ok {
 				fmt.Println("Error: demand_departure_time is not a number, defaulting to 0")
 				demandDepartureTime = 0
