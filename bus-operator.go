@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"net/http"
+	"strconv"
 
 	rcm "github.com/synerex/proto_recommend"
 	api "github.com/synerex/synerex_api"
@@ -21,19 +21,30 @@ import (
 )
 
 var (
-	nodesrv         = flag.String("nodesrv", "127.0.0.1:9990", "Node ID Server")
-	local           = flag.String("local", "", "Local Synerex Server")
-	mu              sync.Mutex
-	version         = "0.0.0"
-	role            = "BusOperator"
-	sxServerAddress string
-	typeProp        = "type"
-	臨時便             = "臨時便"
-	proposedSpIds   []uint64
+	nodesrv              = flag.String("nodesrv", "127.0.0.1:9990", "Node ID Server")
+	local                = flag.String("local", "", "Local Synerex Server")
+	mu                   sync.Mutex
+	version              = "0.0.0"
+	role                 = "BusOperator"
+	sxServerAddress      string
+	rcmClient            *sxutil.SXServiceClient
+	typeProp             = "type"
+	臨時便                  = "臨時便"
+	proposedSpIds        []uint64
+	wantBusDiagramAdjust = false
+	diagramIndex         = 0
+	demandDepartureTime  = 0
 )
 
 func init() {
 	flag.Parse()
+}
+
+type BusDiagramAdjust struct {
+	Want                bool   `json:"want"`
+	Area                string `json:"area"`
+	Index               int    `json:"index"`
+	DemandDepartureTime int    `json:"demand_departure_time"`
 }
 
 func supplyRecommendDemandCallback(clt *sxutil.SXServiceClient, dm *api.Demand) {
@@ -55,15 +66,18 @@ func supplyRecommendDemandCallback(clt *sxutil.SXServiceClient, dm *api.Demand) 
 				return
 			}
 
-			index, ok := result["index"].(int)
-			if !ok {
+			diagramIndexFloat, ok := result["index"].(float64)
+			diagramIndex = int(diagramIndexFloat)
+			log.Printf("%#v,%#v", diagramIndexFloat, diagramIndex)
+			if !ok || err != nil {
 				fmt.Println("Error: index is not a number, defaulting to 0")
-				index = 0
+				diagramIndex = 0
 			} else {
-				fmt.Printf("ID: %d\n", int(index))
+				fmt.Printf("Index: %d\n", int(diagramIndex))
 			}
 
-			demandDepartureTime, ok := result["demand_departure_time"].(int)
+			demandDepartureTimeFloat, ok := result["demand_departure_time"].(float64)
+			demandDepartureTime = int(demandDepartureTimeFloat)
 			if !ok {
 				fmt.Println("Error: demand_departure_time is not a number, defaulting to 0")
 				demandDepartureTime = 0
@@ -71,29 +85,7 @@ func supplyRecommendDemandCallback(clt *sxutil.SXServiceClient, dm *api.Demand) 
 				fmt.Printf("Demand Departure Time: %d\n", int(demandDepartureTime))
 			}
 
-			url := fmt.Sprintf(`http://host.docker.internal:5000/api/v0/bus_diagram_adjust?index=%d&demand_departure_time=%d`, index, demandDepartureTime)
-			resp, err := http.Get(url)
-			if err != nil {
-				fmt.Println("Error:", err)
-				return
-			}
-			defer resp.Body.Close()
-
-			body, err := ioutil.ReadAll(resp.Body)
-			if err != nil {
-				fmt.Println("Error:", err)
-				return
-			}
-
-			fmt.Println("Response:", string(body))
-
-			spo := sxutil.SupplyOpts{
-				Name: role,
-				JSON: fmt.Sprintf(`{ "index": %d , "demand_departure_time": %d, "type": "臨時便", "vehicle": "マイクロバス", "date": "ASAP", "from": "岩倉駅", "to": "江南駅", "stops": "none", "way": "round-trip", "repetition": 4 }`, index, demandDepartureTime),
-			}
-			spid := clt.ProposeSupply(&spo)
-			proposedSpIds = append(proposedSpIds, spid)
-			log.Printf("#2 ProposeSupply OK! spo: %#v, spid: %d\n", spo, spid)
+			wantBusDiagramAdjust = true
 		}
 
 		flag := false
@@ -157,6 +149,59 @@ func reconnectClient(client *sxutil.SXServiceClient) {
 	mu.Unlock()
 }
 
+func postBusDiagramAdjustHandler(w http.ResponseWriter, r *http.Request) {
+	availableStr := r.URL.Query().Get("available")
+	indexStr := r.URL.Query().Get("index")
+	index, err := strconv.Atoi(indexStr)
+	demandDepartureTimeStr := r.URL.Query().Get("demand_departure_time")
+	demandDepartureTime, err2 := strconv.Atoi(demandDepartureTimeStr)
+
+	if err == nil && err2 == nil && availableStr == "True" && index > 0 {
+		spo := sxutil.SupplyOpts{
+			Name: role,
+			JSON: fmt.Sprintf(`{ "index": %d , "demand_departure_time": %d, "type": "臨時便", "vehicle": "マイクロバス", "date": "ASAP", "from": "岩倉駅", "to": "江南駅", "stops": "none", "way": "round-trip", "repetition": 4 }`, index, demandDepartureTime),
+		}
+		spid := rcmClient.ProposeSupply(&spo)
+		proposedSpIds = append(proposedSpIds, spid)
+		log.Printf("#2 ProposeSupply OK! spo: %#v, spid: %d\n", spo, spid)
+	}
+
+	status := BusDiagramAdjust{Want: false, Area: "B", Index: index, DemandDepartureTime: demandDepartureTime}
+
+	log.Printf("Called /api/v0/post_bus_diagram_adjust (available: %+v) -> Response: %+v\n", availableStr, status)
+	response, err := json.Marshal(status)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(response)
+}
+
+func wantBusDiagramAdjustHandler(w http.ResponseWriter, r *http.Request) {
+	status := BusDiagramAdjust{Want: false}
+	if wantBusDiagramAdjust {
+		status.Want = true
+		status.Area = "B"
+		status.Index = diagramIndex
+		status.DemandDepartureTime = demandDepartureTime
+		wantBusDiagramAdjust = false
+	}
+
+	log.Printf("Called /api/v0/want_bus_diagram_adjust -> Response: %+v\n", status)
+	response, err := json.Marshal(status)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(response)
+}
+
 func main() {
 	go sxutil.HandleSigInt()
 	sxutil.RegisterDeferFunction(sxutil.UnRegisterNode)
@@ -185,7 +230,7 @@ func main() {
 		log.Print("Connecting SynerexServer")
 	}
 
-	rcmClient := sxutil.NewSXServiceClient(client, pbase.ALT_PT_SVC, fmt.Sprintf("{Client:%s}", role))
+	rcmClient = sxutil.NewSXServiceClient(client, pbase.ALT_PT_SVC, fmt.Sprintf("{Client:%s}", role))
 	// envClient := sxutil.NewSXServiceClient(client, pbase.JSON_DATA_SVC, fmt.Sprintf("{Client:%s}", role))
 
 	wg.Add(1)
@@ -193,6 +238,10 @@ func main() {
 	go subscribeRecommendSupply(rcmClient)
 	sxutil.SimpleSubscribeDemand(rcmClient, supplyRecommendDemandCallback)
 	// go subscribeJsonRecordSupply(envClient)
+	http.HandleFunc("/api/v0/want_bus_diagram_adjust", wantBusDiagramAdjustHandler)
+	http.HandleFunc("/api/v0/post_bus_diagram_adjust", postBusDiagramAdjustHandler)
+	fmt.Println("Server is running on port 8050")
+	go http.ListenAndServe(":8050", nil)
 
 	// タイマーを開始する
 	ticker := time.NewTicker(15 * time.Second)
