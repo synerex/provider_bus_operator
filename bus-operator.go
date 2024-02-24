@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"strconv"
 
@@ -30,6 +31,7 @@ var (
 	rcmClient            *sxutil.SXServiceClient
 	typeProp             = "type"
 	臨時便                  = "臨時便"
+	ダイヤ調整                = "ダイヤ調整"
 	proposedSpIds        []uint64
 	wantBusDiagramAdjust = false
 	diagramIndex         = 0
@@ -38,6 +40,7 @@ var (
 
 func init() {
 	flag.Parse()
+	rand.Seed(time.Now().UnixNano())
 }
 
 type BusDiagramAdjust struct {
@@ -57,7 +60,27 @@ func supplyRecommendDemandCallback(clt *sxutil.SXServiceClient, dm *api.Demand) 
 	} else {
 		ta := gjson.Get(dm.ArgJson, typeProp)
 		if ta.Type == gjson.String && ta.Str == 臨時便 {
-			log.Printf("Received JsonRecord 臨時便 Demand: Demand %+v, JSON: %s", dm, dm.ArgJson)
+			log.Printf("Received JsonRecord %s Demand: Demand %+v, JSON: %s", 臨時便, dm, dm.ArgJson)
+
+			// 90% の確率で臨時便を調達できると判断するとして NotifyDemand を実行
+			randomNumber := rand.Intn(10)
+			if randomNumber < 9 {
+
+				spo := sxutil.SupplyOpts{
+					Name: role,
+					JSON: fmt.Sprintf(`{ "type": "%s", "vehicle": "マイクロバス", "date": "ASAP", "from": "岩倉駅", "to": "江南駅", "stops": "none", "way": "round-trip", "repetition": 4 }`, 臨時便),
+				}
+				spid := rcmClient.ProposeSupply(&spo)
+				proposedSpIds = append(proposedSpIds, spid)
+				log.Printf("#2 ProposeSupply OK! spo: %#v, spid: %d\n", spo, spid)
+			} else {
+				log.Printf("臨時便調達不能…\n")
+			}
+
+		}
+
+		if ta.Type == gjson.String && ta.Str == ダイヤ調整 {
+			log.Printf("Received JsonRecord %s Demand: Demand %+v, JSON: %s", ダイヤ調整, dm, dm.ArgJson)
 
 			var result map[string]interface{}
 			err := json.Unmarshal([]byte(dm.ArgJson), &result)
@@ -159,7 +182,7 @@ func postBusDiagramAdjustHandler(w http.ResponseWriter, r *http.Request) {
 	if err == nil && err2 == nil && availableStr == "True" && index > 0 {
 		spo := sxutil.SupplyOpts{
 			Name: role,
-			JSON: fmt.Sprintf(`{ "index": %d , "demand_departure_time": %d, "type": "臨時便", "vehicle": "マイクロバス", "date": "ASAP", "from": "岩倉駅", "to": "江南駅", "stops": "none", "way": "round-trip", "repetition": 4 }`, index, demandDepartureTime),
+			JSON: fmt.Sprintf(`{ "index": %d , "demand_departure_time": %d, "type": "%s" }`, index, demandDepartureTime, ダイヤ調整),
 		}
 		spid := rcmClient.ProposeSupply(&spo)
 		proposedSpIds = append(proposedSpIds, spid)
