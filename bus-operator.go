@@ -35,6 +35,7 @@ var (
 	ダイヤ調整                = "ダイヤ調整"
 	proposedSpIds        []uint64
 	wantBusDiagramAdjust = false
+	wantBusAddTemp       = false
 	diagramIndex         = 0
 	demandDepartureTime  = 0
 )
@@ -51,6 +52,12 @@ type BusDiagramAdjust struct {
 	DemandDepartureTime int    `json:"demand_departure_time"`
 }
 
+type BusCanAdd struct {
+	Want        bool   `json:"want"`
+	FromStation string `json:"from_station"`
+	ToStation   string `json:"to_station"`
+}
+
 func supplyRecommendDemandCallback(clt *sxutil.SXServiceClient, dm *api.Demand) {
 	recommend := &rcm.Recommend{}
 	if dm.Cdata != nil {
@@ -63,21 +70,33 @@ func supplyRecommendDemandCallback(clt *sxutil.SXServiceClient, dm *api.Demand) 
 		if ta.Type == gjson.String && ta.Str == 臨時便 {
 			log.Printf("Received JsonRecord %s Demand: Demand %+v, JSON: %s", 臨時便, dm, dm.ArgJson)
 
-			// 90% の確率で臨時便を調達できると判断するとして NotifyDemand を実行
-			randomNumber := rand.Intn(10)
-			if randomNumber < 9 {
-
-				spo := sxutil.SupplyOpts{
-					Name: role,
-					JSON: fmt.Sprintf(`{ "type": "%s", "vehicle": "マイクロバス", "date": "ASAP", "from": "岩倉駅", "to": "江南駅", "stops": "none", "way": "round-trip", "repetition": 4 }`, 臨時便),
-				}
-				spid := rcmClient.ProposeSupply(&spo)
-				proposedSpIds = append(proposedSpIds, spid)
-				log.Printf("#2 ProposeSupply OK! spo: %#v, spid: %d\n", spo, spid)
-			} else {
-				log.Printf("臨時便調達不能…\n")
+			var result map[string]interface{}
+			err := json.Unmarshal([]byte(dm.ArgJson), &result)
+			if err != nil {
+				fmt.Println("Error parsing JSON:", err)
+				return
 			}
 
+			diagramIndexFloat, ok := result["index"].(float64)
+			diagramIndex = int(diagramIndexFloat)
+			log.Printf("%#v,%#v", diagramIndexFloat, diagramIndex)
+			if !ok || err != nil {
+				fmt.Println("Error: index is not a number, defaulting to 0")
+				diagramIndex = 0
+			} else {
+				fmt.Printf("Index: %d\n", int(diagramIndex))
+			}
+
+			demandDepartureTimeFloat, ok := result["demand_departure_time"].(float64)
+			demandDepartureTime = int(demandDepartureTimeFloat)
+			if !ok {
+				fmt.Println("Error: demand_departure_time is not a number, defaulting to 0")
+				demandDepartureTime = 0
+			} else {
+				fmt.Printf("Demand Departure Time: %d\n", int(demandDepartureTime))
+			}
+
+			wantBusAddTemp = true
 		}
 
 		if ta.Type == gjson.String && ta.Str == ダイヤ調整 {
@@ -226,6 +245,82 @@ func wantBusDiagramAdjustHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(response)
 }
 
+// シミュレータから Synerex のバス運行会社に臨時便を調達できるかどうかを返してもらう
+func postBusAddTempHandler(w http.ResponseWriter, r *http.Request) {
+	busstop := r.URL.Query().Get("busstop")
+	isUp := r.URL.Query().Get("is_up") == "True"
+	isStartingPoint := r.URL.Query().Get("is_starting_point") == "True"
+	travelTimeStr := r.URL.Query().Get("travel_time")
+	travelTime, err := strconv.Atoi(travelTimeStr)
+	if err != nil {
+		log.Printf("Error in travelTimeStr: %s, err: %v\n", travelTimeStr, err)
+	}
+	line := r.URL.Query().Get("line")
+	end := r.URL.Query().Get("end")
+	arrivalTimeStr := r.URL.Query().Get("arrival_time")
+	arrivalTime, err := strconv.Atoi(arrivalTimeStr)
+	if err != nil {
+		log.Printf("Error in arrivalTimeStr: %s, err: %v\n", arrivalTimeStr, err)
+	}
+	next := r.URL.Query().Get("next")
+	departureTimeStr := r.URL.Query().Get("departure_time")
+	departureTime, err := strconv.Atoi(departureTimeStr)
+	if err != nil {
+		log.Printf("Error in departureTimeStr: %s, err: %v\n", departureTimeStr, err)
+	}
+	busIDStr := r.URL.Query().Get("bus_id")
+	busID, err := strconv.Atoi(busIDStr)
+	if err != nil {
+		log.Printf("Error in busIDStr: %s, err: %v\n", busIDStr, err)
+	}
+
+	spo := sxutil.SupplyOpts{
+		Name: role,
+		JSON: fmt.Sprintf(
+			`{ "type": "%s", "vehicle": "マイクロバス", "date": "ASAP", "from": "%s", "to": "%s", "stops": "none", "way": "round-trip", "repetition": 4, "isUp": "%t", "isStartingPoint": "%t", "travelTime": %d, "line": "%s", "end": "%s", "arrivalTime": %d, "departureTime": %d, "busID": %d }`,
+			臨時便, busstop, next, isUp, isStartingPoint, travelTime, line, end, arrivalTime, departureTime, busID,
+		),
+	}
+	spid := rcmClient.ProposeSupply(&spo)
+	proposedSpIds = append(proposedSpIds, spid)
+	log.Printf("#2 ProposeSupply OK! spo: %#v, spid: %d\n", spo, spid)
+
+	status := BusCanAdd{Want: false, FromStation: busstop, ToStation: next}
+
+	log.Printf("Called /api/v0/post_bus_can_add_temp -> Response: %+v\n", status)
+	response, err := json.Marshal(status)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(response)
+}
+
+// Synerex のバス運行会社が臨時便を調達したいかどうかをシミュレータに返す
+func wantBusAddTempHandler(w http.ResponseWriter, r *http.Request) {
+	status := BusCanAdd{Want: false}
+	if wantBusAddTemp {
+		status.Want = true
+		status.FromStation = "B"
+		status.ToStation = "C"
+		wantBusAddTemp = false
+	}
+
+	log.Printf("Called /api/v0/want_bus_can_add_temp -> Response: %+v\n", status)
+	response, err := json.Marshal(status)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(response)
+}
+
 func main() {
 	go sxutil.HandleSigInt()
 	sxutil.RegisterDeferFunction(sxutil.UnRegisterNode)
@@ -264,6 +359,8 @@ func main() {
 	// go subscribeJsonRecordSupply(envClient)
 	http.HandleFunc("/api/v0/want_bus_diagram_adjust", wantBusDiagramAdjustHandler)
 	http.HandleFunc("/api/v0/post_bus_diagram_adjust", postBusDiagramAdjustHandler)
+	http.HandleFunc("/api/v0/want_bus_add_temp", wantBusAddTempHandler)
+	http.HandleFunc("/api/v0/post_bus_add_temp", postBusAddTempHandler)
 	fmt.Printf("Server is running on port 805%d\n", *num)
 	go http.ListenAndServe(fmt.Sprintf(":805%d", *num), nil)
 
