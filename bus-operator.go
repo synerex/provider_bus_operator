@@ -24,6 +24,7 @@ import (
 var (
 	nodesrv              = flag.String("nodesrv", "127.0.0.1:9990", "Node ID Server")
 	local                = flag.String("local", "", "Local Synerex Server")
+	num                  = flag.Int("num", 1, "Number of BusOperator")
 	mu                   sync.Mutex
 	version              = "0.0.0"
 	role                 = "BusOperator"
@@ -228,12 +229,12 @@ func wantBusDiagramAdjustHandler(w http.ResponseWriter, r *http.Request) {
 func main() {
 	go sxutil.HandleSigInt()
 	sxutil.RegisterDeferFunction(sxutil.UnRegisterNode)
-	log.Printf("%s(%s) built %s sha1 %s", role, sxutil.GitVer, sxutil.BuildTime, sxutil.Sha1Ver)
+	log.Printf("%s%d(%s) built %s sha1 %s", role, *num, sxutil.GitVer, sxutil.BuildTime, sxutil.Sha1Ver)
 
 	channelTypes := []uint32{pbase.ALT_PT_SVC} //, pbase.JSON_DATA_SVC}
 
 	var rerr error
-	sxServerAddress, rerr = sxutil.RegisterNode(*nodesrv, role, channelTypes, nil)
+	sxServerAddress, rerr = sxutil.RegisterNode(*nodesrv, fmt.Sprintf("%s%d", role, *num), channelTypes, nil)
 
 	if rerr != nil {
 		log.Fatal("Can't register node:", rerr)
@@ -253,8 +254,8 @@ func main() {
 		log.Print("Connecting SynerexServer")
 	}
 
-	rcmClient = sxutil.NewSXServiceClient(client, pbase.ALT_PT_SVC, fmt.Sprintf("{Client:%s}", role))
-	// envClient := sxutil.NewSXServiceClient(client, pbase.JSON_DATA_SVC, fmt.Sprintf("{Client:%s}", role))
+	rcmClient = sxutil.NewSXServiceClient(client, pbase.ALT_PT_SVC, fmt.Sprintf("{Client:%s%d}", role, *num))
+	// envClient := sxutil.NewSXServiceClient(client, pbase.JSON_DATA_SVC, fmt.Sprintf("{Client:%s%d}", role, *num))
 
 	wg.Add(1)
 	log.Print("Subscribe Supply")
@@ -263,8 +264,8 @@ func main() {
 	// go subscribeJsonRecordSupply(envClient)
 	http.HandleFunc("/api/v0/want_bus_diagram_adjust", wantBusDiagramAdjustHandler)
 	http.HandleFunc("/api/v0/post_bus_diagram_adjust", postBusDiagramAdjustHandler)
-	fmt.Println("Server is running on port 8050")
-	go http.ListenAndServe(":8050", nil)
+	fmt.Printf("Server is running on port 805%d\n", *num)
+	go http.ListenAndServe(fmt.Sprintf(":805%d", *num), nil)
 
 	// タイマーを開始する
 	ticker := time.NewTicker(15 * time.Second)
